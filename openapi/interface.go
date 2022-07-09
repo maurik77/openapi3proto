@@ -48,6 +48,11 @@ type Spec struct {
 	Parameters    map[string]*Parameter `yaml:"parameters" json:"parameters"`
 	Extensions    []*Extension          `yaml:"x-extensions" json:"x-extensions"`
 	GlobalOptions GlobalOptions         `yaml:"x-global-options" json:"x-global-options"`
+	Components    Components            `yaml:"components" json:"components"`
+}
+
+type Components struct {
+	Schemas map[string]*Schema `yaml:"schemas" json:"schemas"`
 }
 
 // Extension is used to define Protocol Buffer extensions from
@@ -97,9 +102,14 @@ type Parameters []*Parameter
 
 // Response represents the response object in an OpenAPI spec.
 type Response struct {
-	Description string  `yaml:"description" json:"description"`
-	Schema      *Schema `yaml:"schema" json:"schema"`
-	Ref         string  `yaml:"$ref" json:"$ref"`
+	Description string              `yaml:"description" json:"description"`
+	Schema      *Schema             `yaml:"schema" json:"schema"`
+	Ref         string              `yaml:"$ref" json:"$ref"`
+	Content     map[string]*Content `yaml:"content" json:"content"`
+}
+
+type Content struct {
+	Schema *Schema `yaml:"schema" json:"schema"`
 }
 
 // Endpoint represents an endpoint for a path in an OpenAPI spec.

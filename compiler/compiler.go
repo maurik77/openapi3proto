@@ -114,6 +114,9 @@ func Compile(spec *openapi.Spec, options ...Option) (*protobuf.Package, error) {
 	if err := c.compileResponses(spec.Responses); err != nil {
 		return nil, errors.Wrap(err, `failed to compile global responses`)
 	}
+	if err := c.compileComponents(spec.Components); err != nil {
+		return nil, errors.Wrap(err, `failed to compile components`)
+	}
 
 	p2, err := protobuf.Resolve(c.pkg, c.getTypeFromReference)
 	if err != nil {
@@ -243,6 +246,30 @@ func (c *compileCtx) compileResponses(responses map[string]*openapi.Response) er
 	return nil
 }
 
+// Note: compiles GLOBAL components. not to be used for compiling
+// actual endpoint responses
+func (c *compileCtx) compileComponents(components openapi.Components) error {
+	c.phase = phaseCompileDefinitions
+
+	if components.Schemas == nil {
+		return nil
+	}
+
+	for name, schema := range components.Schemas {
+		if schema == nil {
+			c.addDefinition("#/responses/"+name, protobuf.NewMessage(name))
+			continue
+		}
+		m, err := c.compileSchema(camelCase(name), schema)
+		if err != nil {
+			return errors.Wrapf(err, `failed to compile #/parameters/%s`, name)
+		}
+		c.addDefinition("#/responses/"+name, m)
+		c.addDefinition("#/definitions/"+name, m)
+	}
+	return nil
+}
+
 func (c *compileCtx) compileExtension(ext *openapi.Extension) (*protobuf.Extension, error) {
 	e := protobuf.NewExtension(ext.Base)
 	for _, f := range ext.Fields {
@@ -356,14 +383,23 @@ func (c *compileCtx) compilePath(path string, p *openapi.Path) error {
 			}
 
 			resName := endpointName + "Response"
-			if resp.Schema != nil {
+			schema := resp.Schema
+
+			if schema == nil {
+				for _, value := range resp.Content {
+					schema = value.Schema
+					break
+				}
+			}
+
+			if schema != nil {
 				// Wow, this *sucks*! We need to special-case when resp.Schema
 				// is an array definition, because then we need to create
 				// a FooResponse { repeated Bar field } instead of what we
 				// do in the property definition, which is to compile the
 				// Items schema and slap a repeated on it
-				if resp.Schema.Items != nil {
-					typ, err := c.compileSchema(resName, resp.Schema.Items)
+				if schema.Items != nil {
+					typ, err := c.compileSchema(resName, schema.Items)
 					if err != nil {
 						return errors.Wrapf(err, `failed to compile array response for %s`, endpointName)
 					}
@@ -373,7 +409,7 @@ func (c *compileCtx) compilePath(path string, p *openapi.Path) error {
 					m.AddField(f)
 					resType = m
 				} else {
-					typ, err := c.compileSchema(resName, resp.Schema)
+					typ, err := c.compileSchema(resName, schema)
 					if err != nil {
 						return errors.Wrapf(err, `failed to compile response for %s`, endpointName)
 					}
