@@ -256,18 +256,47 @@ func (c *compileCtx) compileComponents(components openapi.Components) error {
 	}
 
 	for name, schema := range components.Schemas {
-		if schema == nil {
-			c.addDefinition("#/responses/"+name, protobuf.NewMessage(name))
+		if len(schema.AllOf) > 0 {
 			continue
 		}
-		m, err := c.compileSchema(camelCase(name), schema)
-		if err != nil {
-			return errors.Wrapf(err, `failed to compile #/parameters/%s`, name)
+
+		shouldReturn, returnValue := addComponent(schema, c, name)
+		if shouldReturn {
+			return returnValue
 		}
-		c.addDefinition("#/responses/"+name, m)
-		c.addDefinition("#/definitions/"+name, m)
 	}
+
+	for name, schema := range components.Schemas {
+		if len(schema.AllOf) == 0 {
+			continue
+		}
+
+		shouldReturn, returnValue := addComponent(schema, c, name)
+		if shouldReturn {
+			return returnValue
+		}
+	}
+
 	return nil
+}
+
+func addComponent(schema *openapi.Schema, c *compileCtx, name string) (bool, error) {
+	if schema == nil {
+		c.addDefinition("#/components/schemas/"+name, protobuf.NewMessage(name))
+		c.addDefinition("#/responses/"+name, protobuf.NewMessage(name))
+		c.addDefinition("#/definitions/"+name, protobuf.NewMessage(name))
+		return false, nil
+	}
+
+	m, err := c.compileSchema(camelCase(name), schema)
+	if err != nil {
+		return true, errors.Wrapf(err, `failed to compile #/parameters/%s`, name)
+	}
+
+	c.addDefinition("#/components/schemas/"+name, m)
+	c.addDefinition("#/responses/"+name, m)
+	c.addDefinition("#/definitions/"+name, m)
+	return false, nil
 }
 
 func (c *compileCtx) compileExtension(ext *openapi.Extension) (*protobuf.Extension, error) {
@@ -655,17 +684,22 @@ func (c *compileCtx) compileSchema(name string, s *openapi.Schema) (protobuf.Typ
 	}
 
 	if len(s.AllOf) > 0 {
-		if len(s.AllOf) > 1 {
-			return nil, errors.New("allOf with multiple values is not supported")
-		}
+		for _, innerSchema := range s.AllOf {
+			innerName := innerSchema.ProtoName
 
-		// If there is only a single argument in allOf, then it's probably just for adding description, so just take the
-		// current field
-		m, err := c.compileSchema(name, s.AllOf[0])
-		if err != nil {
-			return nil, errors.Wrap(err, `failed to resolve allOf`)
+			if i := strings.LastIndexByte(innerSchema.Ref, '/'); i > -1 {
+				innerName = innerSchema.Ref[i+1:]
+			}
+
+			if innerSchema.Ref == "" {
+				innerName = name
+			}
+
+			_, err := c.compileSchema(innerName, innerSchema)
+			if err != nil {
+				return nil, errors.Wrap(err, `failed to resolve allOf`)
+			}
 		}
-		return m, nil
 	}
 
 	rawName := name
