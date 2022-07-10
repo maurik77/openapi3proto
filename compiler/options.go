@@ -4,6 +4,7 @@ import "github.com/NYTimes/openapi2proto/internal/option"
 
 const (
 	optkeyAnnotation         = "annotation"
+	optkeyAllOfFieldPrefix   = "allof-prefix"
 	optkeySkipRpcs           = "skip-rpcs"
 	optKeySkipDeprecatedRpcs = "skip-deprecated-rpcs"
 	optkeyPrefixEnums        = "namespace-enums"
@@ -14,6 +15,12 @@ const (
 // google.api.http annotation to the compiled Protocol Buffers structure
 func WithAnnotation(b bool) Option {
 	return option.New(optkeyAnnotation, b)
+}
+
+// WithAllOfFieldPrefix creates a new Option to specify the prefix to use when create fields name of
+// types declared as allOf
+func WithAllOfFieldPrefix(prefix string) Option {
+	return option.New(optkeyAllOfFieldPrefix, prefix)
 }
 
 // WithSkipRpcs creates a new Option to specify if we should

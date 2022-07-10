@@ -28,6 +28,7 @@ type compileCtx struct {
 	imports             map[string]struct{}
 	parents             []protobuf.Container
 	phase               int
+	allOfFieldPrefix    string
 	pkg                 *protobuf.Package
 	rpcs                map[string]*protobuf.RPC
 	spec                *openapi.Spec

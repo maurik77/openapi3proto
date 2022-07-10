@@ -4,6 +4,7 @@ package compiler // github.com/NYTimes/openapi2proto/compiler
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -54,6 +55,7 @@ func newCompileCtx(spec *openapi.Spec, options ...Option) *compileCtx {
 	var skipDeprecatedRpcs bool
 	var prefixEnums bool
 	var wrapPrimitives bool
+	var allOfFieldPrefix string
 	for _, o := range options {
 		switch o.Name() {
 		case optkeyAnnotation:
@@ -66,6 +68,8 @@ func newCompileCtx(spec *openapi.Spec, options ...Option) *compileCtx {
 			prefixEnums = o.Value().(bool)
 		case optkeyWrapPrimitives:
 			wrapPrimitives = o.Value().(bool)
+		case optkeyAllOfFieldPrefix:
+			allOfFieldPrefix = o.Value().(string)
 		}
 	}
 
@@ -87,6 +91,7 @@ func newCompileCtx(spec *openapi.Spec, options ...Option) *compileCtx {
 		unfulfilledRefs:     map[string]struct{}{},
 		messageNames:        map[string]bool{},
 		wrapperMessages:     map[string]bool{},
+		allOfFieldPrefix:    allOfFieldPrefix,
 	}
 	return c
 }
@@ -283,8 +288,6 @@ func (c *compileCtx) compileComponents(components openapi.Components) error {
 func addComponent(schema *openapi.Schema, c *compileCtx, name string) (bool, error) {
 	if schema == nil {
 		c.addDefinition("#/components/schemas/"+name, protobuf.NewMessage(name))
-		c.addDefinition("#/responses/"+name, protobuf.NewMessage(name))
-		c.addDefinition("#/definitions/"+name, protobuf.NewMessage(name))
 		return false, nil
 	}
 
@@ -294,8 +297,6 @@ func addComponent(schema *openapi.Schema, c *compileCtx, name string) (bool, err
 	}
 
 	c.addDefinition("#/components/schemas/"+name, m)
-	c.addDefinition("#/responses/"+name, m)
-	c.addDefinition("#/definitions/"+name, m)
 	return false, nil
 }
 
@@ -684,7 +685,7 @@ func (c *compileCtx) compileSchema(name string, s *openapi.Schema) (protobuf.Typ
 	}
 
 	if len(s.AllOf) > 0 {
-		err := c.newMethod(s, name)
+		err := c.compileAllOf(s, name)
 		if err != nil {
 			return nil, errors.Wrap(err, `failed to resolve allOf`)
 		}
@@ -771,7 +772,7 @@ func (c *compileCtx) compileSchema(name string, s *openapi.Schema) (protobuf.Typ
 	}
 }
 
-func (c *compileCtx) newMethod(s *openapi.Schema, name string) error {
+func (c *compileCtx) compileAllOf(s *openapi.Schema, name string) error {
 	var rootSchema *openapi.Schema
 	baseSchemas := make(map[string]*openapi.Schema)
 
@@ -796,7 +797,8 @@ func (c *compileCtx) newMethod(s *openapi.Schema, name string) error {
 	}
 
 	for key, value := range baseSchemas {
-		rootSchema.Properties[snakeCase(key)] = value
+		propertyName := fmt.Sprintf("%v%v", c.allOfFieldPrefix, snakeCase(key))
+		rootSchema.Properties[propertyName] = value
 	}
 
 	_, err := c.compileSchema(name, rootSchema)
