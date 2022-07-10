@@ -684,21 +684,9 @@ func (c *compileCtx) compileSchema(name string, s *openapi.Schema) (protobuf.Typ
 	}
 
 	if len(s.AllOf) > 0 {
-		for _, innerSchema := range s.AllOf {
-			innerName := innerSchema.ProtoName
-
-			if i := strings.LastIndexByte(innerSchema.Ref, '/'); i > -1 {
-				innerName = innerSchema.Ref[i+1:]
-			}
-
-			if innerSchema.Ref == "" {
-				innerName = name
-			}
-
-			_, err := c.compileSchema(innerName, innerSchema)
-			if err != nil {
-				return nil, errors.Wrap(err, `failed to resolve allOf`)
-			}
+		err := c.newMethod(s, name)
+		if err != nil {
+			return nil, errors.Wrap(err, `failed to resolve allOf`)
 		}
 	}
 
@@ -781,6 +769,42 @@ func (c *compileCtx) compileSchema(name string, s *openapi.Schema) (protobuf.Typ
 	default:
 		return nil, errors.Errorf(`don't know how to handle schema type '%s'`, s.Type)
 	}
+}
+
+func (c *compileCtx) newMethod(s *openapi.Schema, name string) error {
+	var rootSchema *openapi.Schema
+	baseSchemas := make(map[string]*openapi.Schema)
+
+	for _, innerSchema := range s.AllOf {
+		if innerSchema.Ref == "" {
+			rootSchema = innerSchema
+			continue
+		}
+
+		innerName := innerSchema.ProtoName
+
+		if i := strings.LastIndexByte(innerSchema.Ref, '/'); i > -1 {
+			innerName = innerSchema.Ref[i+1:]
+		}
+
+		_, err := c.compileSchema(innerName, innerSchema)
+		if err != nil {
+			return errors.Wrap(err, `failed to resolve allOf`)
+		}
+
+		baseSchemas[innerName] = innerSchema
+	}
+
+	for key, value := range baseSchemas {
+		rootSchema.Properties[snakeCase(key)] = value
+	}
+
+	_, err := c.compileSchema(name, rootSchema)
+	if err != nil {
+		return errors.Wrap(err, `failed to resolve allOf`)
+	}
+
+	return nil
 }
 
 func (c *compileCtx) compileSchemaProperties(m *protobuf.Message, props map[string]*openapi.Schema) error {
