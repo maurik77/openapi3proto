@@ -12,7 +12,7 @@
             "program": "cmd/openapi2proto/main.go",
             "args": [
                 "-spec",
-                "C:\\Users\\mauri\\projects\\poste\\health\\bbs\\communication\\artifacts\\meeting\\openapi.yaml",
+                "/home/mauro/projects/health/bbs/booking/artifacts/booking/openapi.yaml",
                 // "-allof-prefix",
                 // "extension_"
             ],

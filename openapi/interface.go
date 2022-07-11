@@ -124,6 +124,13 @@ type Endpoint struct {
 	OperationID   string                 `yaml:"operationId" json:"operationId"`
 	CustomOptions map[string]interface{} `yaml:"x-options" json:"x-options"`
 	Deprecated    bool                   `yaml:"deprecated" json:"deprecated"`
+	RequestBody   RequestBody            `yaml:"requestBody" json:"requestBody"`
+}
+
+type RequestBody struct {
+	Description string              `yaml:"description" json:"description"`
+	Required    bool                `yaml:"required" json:"required"`
+	Content     map[string]*Content `yaml:"content" json:"content"`
 }
 
 // Model represents a model definition from an OpenAPI spec.

@@ -186,14 +186,10 @@ func extractComment(v interface{}) string {
 
 func (c *compileCtx) compileDefinitions(definitions map[string]*openapi.Schema) error {
 	c.phase = phaseCompileDefinitions
-	for ref, schema := range definitions {
-		m, err := c.compileSchema(camelCase(ref), schema)
-		if err != nil {
-			return errors.Wrapf(err, `failed to compile #/definition/%s`, ref)
-		}
-		c.addDefinition("#/definitions/"+ref, m)
-	}
-	return nil
+
+	err := c.compileSchemas(definitions, "#/definitions/")
+
+	return err
 }
 
 // Note: compiles GLOBAL parameters. not to be used for compiling
@@ -251,6 +247,32 @@ func (c *compileCtx) compileResponses(responses map[string]*openapi.Response) er
 	return nil
 }
 
+func (c *compileCtx) compileSchemas(schemas map[string]*openapi.Schema, prefix string) error {
+	for name, schema := range schemas {
+		if len(schema.AllOf) > 0 {
+			continue
+		}
+
+		shouldReturn, returnValue := c.addDefinitionHelper(name, schema, prefix)
+		if shouldReturn {
+			return returnValue
+		}
+	}
+
+	for name, schema := range schemas {
+		if len(schema.AllOf) == 0 {
+			continue
+		}
+
+		shouldReturn, returnValue := c.addDefinitionHelper(name, schema, prefix)
+		if shouldReturn {
+			return returnValue
+		}
+	}
+
+	return nil
+}
+
 // Note: compiles GLOBAL components. not to be used for compiling
 // actual endpoint responses
 func (c *compileCtx) compileComponents(components openapi.Components) error {
@@ -260,43 +282,19 @@ func (c *compileCtx) compileComponents(components openapi.Components) error {
 		return nil
 	}
 
-	for name, schema := range components.Schemas {
-		if len(schema.AllOf) > 0 {
-			continue
-		}
+	err := c.compileSchemas(components.Schemas, "#/components/schemas/")
 
-		shouldReturn, returnValue := addComponent(schema, c, name)
-		if shouldReturn {
-			return returnValue
-		}
-	}
-
-	for name, schema := range components.Schemas {
-		if len(schema.AllOf) == 0 {
-			continue
-		}
-
-		shouldReturn, returnValue := addComponent(schema, c, name)
-		if shouldReturn {
-			return returnValue
-		}
-	}
-
-	return nil
+	return err
 }
 
-func addComponent(schema *openapi.Schema, c *compileCtx, name string) (bool, error) {
-	if schema == nil {
-		c.addDefinition("#/components/schemas/"+name, protobuf.NewMessage(name))
-		return false, nil
-	}
+func (c *compileCtx) addDefinitionHelper(name string, schema *openapi.Schema, prefix string) (bool, error) {
 
 	m, err := c.compileSchema(camelCase(name), schema)
 	if err != nil {
-		return true, errors.Wrapf(err, `failed to compile #/parameters/%s`, name)
+		return true, errors.Wrapf(err, `failed to compile %s%s`, prefix, name)
 	}
 
-	c.addDefinition("#/components/schemas/"+name, m)
+	c.addDefinition(prefix+name, m)
 	return false, nil
 }
 
@@ -551,6 +549,27 @@ func (c *compileCtx) getTypeFromReference(ref string) (protobuf.Type, error) {
 		return t, nil
 	}
 
+	// name := ref
+	// prefix := ""
+
+	// if i := strings.LastIndexByte(ref, '/'); i > -1 {
+	// 	name = ref[i+1:]
+	// 	prefix = ref[:i]
+	// }
+
+	// switch prefix {
+	// case "#/definitions":
+	// 	if schema, ok := c.spec.Definitions[name]; ok {
+	// 		return c.compileSchema(name, schema)
+	// 	}
+	// case "#/components/schemas":
+	// 	if c.spec.Components.Schemas != nil {
+	// 		if schema, ok := c.spec.Components.Schemas[ref]; ok {
+	// 			return c.compileSchema(name, schema)
+	// 		}
+	// 	}
+	// }
+
 	return nil, errors.Errorf(`reference %s could not be resolved`, ref)
 }
 
@@ -685,9 +704,13 @@ func (c *compileCtx) compileSchema(name string, s *openapi.Schema) (protobuf.Typ
 	}
 
 	if len(s.AllOf) > 0 {
-		err := c.compileAllOf(s, name)
+		m, shouldReturn, err := c.compileAllOf(s, name)
 		if err != nil {
 			return nil, errors.Wrap(err, `failed to resolve allOf`)
+		}
+
+		if shouldReturn {
+			return m, err
 		}
 	}
 
@@ -772,7 +795,12 @@ func (c *compileCtx) compileSchema(name string, s *openapi.Schema) (protobuf.Typ
 	}
 }
 
-func (c *compileCtx) compileAllOf(s *openapi.Schema, name string) error {
+func (c *compileCtx) compileAllOf(s *openapi.Schema, name string) (protobuf.Type, bool, error) {
+	if len(s.AllOf) == 1 {
+		m, err := c.compileSchema(name, s.AllOf[0])
+		return m, true, err
+	}
+
 	var rootSchema *openapi.Schema
 	baseSchemas := make(map[string]*openapi.Schema)
 
@@ -788,9 +816,9 @@ func (c *compileCtx) compileAllOf(s *openapi.Schema, name string) error {
 			innerName = innerSchema.Ref[i+1:]
 		}
 
-		_, err := c.compileSchema(innerName, innerSchema)
+		m, err := c.compileSchema(innerName, innerSchema)
 		if err != nil {
-			return errors.Wrap(err, `failed to resolve allOf`)
+			return m, false, errors.Wrap(err, `failed to resolve allOf`)
 		}
 
 		baseSchemas[innerName] = innerSchema
@@ -798,15 +826,18 @@ func (c *compileCtx) compileAllOf(s *openapi.Schema, name string) error {
 
 	for key, value := range baseSchemas {
 		propertyName := fmt.Sprintf("%v%v", c.allOfFieldPrefix, snakeCase(key))
-		rootSchema.Properties[propertyName] = value
+
+		if rootSchema != nil {
+			rootSchema.Properties[propertyName] = value
+		}
 	}
 
-	_, err := c.compileSchema(name, rootSchema)
+	m, err := c.compileSchema(name, rootSchema)
 	if err != nil {
-		return errors.Wrap(err, `failed to resolve allOf`)
+		return m, false, errors.Wrap(err, `failed to resolve allOf`)
 	}
 
-	return nil
+	return m, false, nil
 }
 
 func (c *compileCtx) compileSchemaProperties(m *protobuf.Message, props map[string]*openapi.Schema) error {
